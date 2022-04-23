@@ -4,7 +4,7 @@
 
 <a href="https://hack36.com"> <img src="https://cutt.ly/BuiltAtHack36" height=24px> </a>
 
-
+Note: There are two branches in this project. The code of the Android application is in branch android_app. 
 ## Introduction:
   When considering the dangers of alcohol and car accidents, most people think of drunk driving. However, a large percentage of vehicle accidents involve pedestrians who have been drinking.
 A substantial part of the pedestrian accident problem arises from intoxicated pedestrians.
@@ -22,15 +22,15 @@ We propose an AI based solution to the above two problems which will be an add o
 - Distracted
 
 
-In the past 36 hours, we've made a dataset consisting of 22k datapoints, and trained a convoluted neural network to get an accuracy of around 80 percentage.  
-When a person is distracted while using his phone, he will be notificed on his phone itself, and this system would be more sensitive when the person is near areas of traffic or danger using the person's location.
-Similarly, when a person is heavily drunk, the model detects the unstable motion and after a certain threshold would generate an SOS call which will notify the specified person and provide the intoxicated person's location. Outside the 36 hours, we've decided to add  sobriety test to prevent rare false alarms before sending the SOS.
+In the past 36 hours, we've made a dataset consisting of 22k datapoints, and trained a convolutional neural network to get an accuracy of around 80 percentage.  
+When a person is distracted while using his phone, he will be notified on his phone itself, and this system would be more sensitive when the person is near areas of traffic or danger using the person's location.
+Similarly, when a person is heavily drunk, the model detects the unstable motion and after a certain threshold would generate an SOS call which will notify the specified person and provide the intoxicated person's location. Outside the 36 hours, we've decided to add sobriety test to prevent rare false alarms before sending the SOS.
   
 ## Demo Video Link:
-  <a href="https://youtu.be/dQw4w9WgXcQ">https://youtu.be/dQw4w9WgXcQ</a>
+  <a href="https://drive.google.com/file/d/14Ar0FxXDizvDio_Xh6Xq36WklLWJELIU/view">Click here...</a>
   
 ## Presentation Link:
-  <a href="https://drive.google.com/file/d/1Og-rWnAioFsySGSuhTSswYFdiT1rg9vz/view"> PPT link here </a>1
+  <a href="https://drive.google.com/file/d/1Og-rWnAioFsySGSuhTSswYFdiT1rg9vz/view"> PPT link here </a>
 
 ## Technology Stack:
   1) Native Android in Java.
