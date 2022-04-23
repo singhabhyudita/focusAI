@@ -5,6 +5,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.AssetFileDescriptor;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -15,6 +16,13 @@ import android.os.Vibrator;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
+
+import org.tensorflow.lite.Interpreter;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
 
 public class MotionSensor extends Thread implements SensorEventListener {
 
@@ -33,6 +41,11 @@ public class MotionSensor extends Thread implements SensorEventListener {
     private int counter = 0;
     private int sentCount = 0;
     long lastSaved = System.currentTimeMillis();
+    private Interpreter interpreter;
+
+    double pDistracted = 0.0;
+    double pDrunk = 0.0;
+    double pNormal = 0.0;
 
     public MotionSensor(Context context) {
         this.context = context;
@@ -42,20 +55,35 @@ public class MotionSensor extends Thread implements SensorEventListener {
     public void run() {
         Log.d(TAG, "Initializing sensor services");
         sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
-        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
+
+        try {
+            interpreter = new Interpreter(loadModelFile());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     public void startSensor() {
         counter = 0;
         sentCount = 0;
         firstData = true;
-        sensorManager.registerListener(MotionSensor.this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
+        sensorManager.registerListener(MotionSensor.this, accelerometer, SensorManager.SENSOR_DELAY_FASTEST);
         Log.d(TAG, "Registered accelerometer listener");
     }
 
     public void stopSensor() {
         sensorManager.unregisterListener(MotionSensor.this, accelerometer);
         Log.d(TAG, "Unregistered accelerometer listener");
+    }
+
+    private MappedByteBuffer loadModelFile() throws IOException {
+        AssetFileDescriptor fileDescriptor = context.getAssets().openFd("takia.tflite");
+        FileInputStream fileInputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
+        FileChannel fileChannel = fileInputStream.getChannel();
+        long startOffsets = fileDescriptor.getStartOffset();
+        long declaredLength = fileDescriptor.getDeclaredLength();
+        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffsets, declaredLength);
     }
 
     @Override
@@ -66,29 +94,54 @@ public class MotionSensor extends Thread implements SensorEventListener {
         if ((System.currentTimeMillis() - lastSaved) > ACCELEROMETER_TIME_PERIOD) {
             lastSaved = System.currentTimeMillis();
 
-            System.out.println("Reading...");
-
             if(counter == 40){
                 counter = 0;
-                for(int i = 0; i < 40; i++)
-                {
-                    valuesLeft[i][0] = valuesRight[i][0];
-                    valuesLeft[i][1] = valuesRight[i][1];
-                    valuesLeft[i][2] = valuesRight[i][2];
-                }
-
                 if(!firstData) {
-                    System.out.println("Send data...");
+
+                    float[][][][] input = new float[1][80][3][1];
+                    int k = 0;
+                    for(int i = 0 ; i < 40; i++) {
+                        for (int j = 0; j < 3; j++)
+                            input[0][k][j][0] = valuesLeft[i][j];
+                        k++;
+                    }
+                    for(int i = 0 ; i < 40; i++) {
+                        for (int j = 0; j < 3; j++)
+                            input[0][k][j][0] = valuesRight[i][j];
+                        k++;
+                    }
+                    float[][] output = new float[1][3];
+                    interpreter.run(input, output);
+
+                    if(output[0][0] > output[0][1] && output[0][0] > output[0][2]) {
+                        System.out.println("Distracted");
+                        pDistracted++;
+                    }
+                    else if(output[0][1] > output[0][0] && output[0][1] > output[0][2]) {
+                        System.out.println("Drunk");
+                        pDrunk++;
+                    }
+                    else {
+                        System.out.println("Normal");
+                        pNormal++;
+                    }
+
+                    for(int i = 0; i < 40; i++)
+                    {
+                        valuesLeft[i][0] = valuesRight[i][0];
+                        valuesLeft[i][1] = valuesRight[i][1];
+                        valuesLeft[i][2] = valuesRight[i][2];
+                    }
 
                     // TODO: Get class from model
                     sentCount++;
-                    if(sentCount == 3){
-                        stopSensor();
+                    if(sentCount == 10){
 
-                        double pSafe = Math.random();
-                        double pDrunk = Math.random();
-                        double pUnsafe = 1 - pSafe;
-                        if(pDrunk > 0.7 || pUnsafe > 0.6) {
+                        pDrunk /= 10;
+                        pDistracted /= 10;
+                        pNormal /= 10;
+
+                        if(pDrunk > 0.7 || pNormal < 0.4) {
                             final Vibrator vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
                             final VibrationEffect vibrationEffect1;
                             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -123,17 +176,11 @@ public class MotionSensor extends Thread implements SensorEventListener {
                             }
 
                             notificationManager.notify(1, builder.build());
+
+                            pDistracted = pDrunk = pNormal = 0.0;
                         }
 
-                        long t = (long) Math.ceil(1000 * 60 * 2 * pSafe);
-                        try {
-                            System.out.println("Sleeping for " + t + " ms");
-                            Thread.sleep(t);
-                            startSensor();
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
-                        return;
+                        sentCount = 0;
                     }
                 }
                 else
@@ -142,7 +189,7 @@ public class MotionSensor extends Thread implements SensorEventListener {
 
             valuesRight[counter][0] = event.values[0];
             valuesRight[counter][1] = event.values[1];
-            valuesRight[counter][1] = event.values[2];
+            valuesRight[counter][2] = event.values[2];
             counter++;
         }
     }
