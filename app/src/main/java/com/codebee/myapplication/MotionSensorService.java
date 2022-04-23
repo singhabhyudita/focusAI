@@ -3,6 +3,7 @@ package com.codebee.myapplication;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.AssetFileDescriptor;
@@ -11,10 +12,11 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Build;
+import android.os.IBinder;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
-import android.util.Log;
 
+import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
 import org.tensorflow.lite.Interpreter;
@@ -24,15 +26,10 @@ import java.io.IOException;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 
-public class MotionSensor extends Thread implements SensorEventListener {
-
-    private static final String TAG = "MotionSensor";
+public class MotionSensorService extends Service implements SensorEventListener {
 
     private SensorManager sensorManager;
     private Sensor accelerometer;
-
-    private final Context context;
-    private volatile boolean stopThread = false;
 
     private boolean firstData = true;
     float[][] valuesLeft = new float[40][3];
@@ -47,38 +44,24 @@ public class MotionSensor extends Thread implements SensorEventListener {
     double pDrunk = 0.0;
     double pNormal = 0.0;
 
-    public MotionSensor(Context context) {
-        this.context = context;
-    }
 
     @Override
-    public void run() {
-        Log.d(TAG, "Initializing sensor services");
-        sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
-        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
-
-        try {
-            interpreter = new Interpreter(loadModelFile());
-        } catch (Exception e) {
-            e.printStackTrace();
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        if(intent != null){
+            String action = intent.getAction();
+            if(action != null){
+                if(action.equals(Constants.ACTION_START_SENSOR_SERVICE)){
+                    startSensorService();
+                }else if(action.equals(Constants.ACTION_STOP_SENSOR_SERVICE)){
+                    stopSensorService();
+                }
+            }
         }
-    }
-
-    public void startSensor() {
-        counter = 0;
-        sentCount = 0;
-        firstData = true;
-        sensorManager.registerListener(MotionSensor.this, accelerometer, SensorManager.SENSOR_DELAY_FASTEST);
-        Log.d(TAG, "Registered accelerometer listener");
-    }
-
-    public void stopSensor() {
-        sensorManager.unregisterListener(MotionSensor.this, accelerometer);
-        Log.d(TAG, "Unregistered accelerometer listener");
+        return super.onStartCommand(intent, flags, startId);
     }
 
     private MappedByteBuffer loadModelFile() throws IOException {
-        AssetFileDescriptor fileDescriptor = context.getAssets().openFd("takia.tflite");
+        AssetFileDescriptor fileDescriptor = getAssets().openFd("takia.tflite");
         FileInputStream fileInputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
         FileChannel fileChannel = fileInputStream.getChannel();
         long startOffsets = fileDescriptor.getStartOffset();
@@ -86,9 +69,58 @@ public class MotionSensor extends Thread implements SensorEventListener {
         return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffsets, declaredLength);
     }
 
+    private void startSensorService() {
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
+
+        try {
+            interpreter = new Interpreter(loadModelFile());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        String channelId = "sensor_notification_channel";
+        NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        Intent resultIntent = new Intent();
+        PendingIntent pendingIntent = PendingIntent.getActivity(getApplicationContext(), 0, resultIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), channelId);
+        builder.setSmallIcon(R.mipmap.ic_launcher);
+        builder.setContentTitle("Sensor Service");
+        builder.setDefaults(NotificationCompat.DEFAULT_ALL);
+        builder.setContentText("FocusAI is tracking your motion.");
+        builder.setAutoCancel(false);
+        builder.setPriority(NotificationCompat.PRIORITY_MAX);
+        builder.setContentIntent(pendingIntent);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (notificationManager != null && notificationManager.getNotificationChannel(channelId) == null) {
+                NotificationChannel notificationChannel = new NotificationChannel(
+                        channelId,
+                        "Sensor Service",
+                        NotificationManager.IMPORTANCE_HIGH
+                );
+                notificationChannel.setDescription("This channel is used by sensor service.");
+                notificationManager.createNotificationChannel(notificationChannel);
+            }
+        }
+
+        counter = 0;
+        sentCount = 0;
+        firstData = true;
+        sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_FASTEST);
+
+        startForeground(Constants.SENSOR_SERVICE_ID, builder.build());
+    }
+
+    private void stopSensorService() {
+        sensorManager.unregisterListener(this, accelerometer);
+        stopForeground(true);
+        stopSelf();
+    }
+
     @Override
     public void onSensorChanged(SensorEvent event) {
-
         int ACCELEROMETER_TIME_PERIOD = 50; // 20Hz frequency
 
         if ((System.currentTimeMillis() - lastSaved) > ACCELEROMETER_TIME_PERIOD) {
@@ -133,7 +165,6 @@ public class MotionSensor extends Thread implements SensorEventListener {
                         valuesLeft[i][2] = valuesRight[i][2];
                     }
 
-                    // TODO: Get class from model
                     sentCount++;
                     if(sentCount == 10){
 
@@ -141,8 +172,8 @@ public class MotionSensor extends Thread implements SensorEventListener {
                         pDistracted /= 10;
                         pNormal /= 10;
 
-                        if(pDrunk > 0.7 || pNormal < 0.4) {
-                            final Vibrator vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+                        if(pDrunk > 0.7) {
+                            final Vibrator vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
                             final VibrationEffect vibrationEffect1;
                             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                                 vibrationEffect1 = VibrationEffect.createOneShot(5000, VibrationEffect.EFFECT_HEAVY_CLICK);
@@ -151,11 +182,11 @@ public class MotionSensor extends Thread implements SensorEventListener {
                             }
 
                             String channelId = "motion_sensor_notification_channel";
-                            NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+                            NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
                             Intent resultIntent = new Intent();
-                            PendingIntent pendingIntent = PendingIntent.getActivity(context.getApplicationContext(), 0, resultIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+                            PendingIntent pendingIntent = PendingIntent.getActivity(getApplicationContext(), 0, resultIntent, PendingIntent.FLAG_UPDATE_CURRENT);
 
-                            NotificationCompat.Builder builder = new NotificationCompat.Builder(context.getApplicationContext(), channelId);
+                            NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), channelId);
                             builder.setSmallIcon(R.mipmap.ic_launcher);
                             builder.setContentTitle("FocusAI");
                             builder.setDefaults(NotificationCompat.DEFAULT_ALL);
@@ -192,6 +223,12 @@ public class MotionSensor extends Thread implements SensorEventListener {
             valuesRight[counter][2] = event.values[2];
             counter++;
         }
+    }
+
+    @Nullable
+    @Override
+    public IBinder onBind(Intent intent) {
+        throw  new UnsupportedOperationException("Not yet implemented!");
     }
 
     @Override
