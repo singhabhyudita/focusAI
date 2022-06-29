@@ -3,6 +3,7 @@
 </p>
 
 <a href="https://hack36.com"> <img src="https://cutt.ly/BuiltAtHack36" height=24px> </a>
+<h4>Ranked amongst the Top 5 teams overall and runner's up in college. </h4>
 
 Note: There are two branches in this project. The code of the Android application is in branch android_app. 
 ## Introduction:
